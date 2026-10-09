@@ -1,0 +1,6 @@
+{
+  "name": "Professional Freelancer",
+  "description": "Quality freelance services for your projects. Select a service and download your files instantly after secure payment via JazzCash.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
