@@ -14,39 +14,62 @@ import {
   RotateCcw,
   ChevronDown,
   Sparkles,
-  UserCheck
+  HardDrive,
+  FolderOpen,
+  Upload,
+  Image as ImageIcon,
+  Clock,
+  Eye,
+  X,
+  FileCheck,
+  KeyRound
 } from 'lucide-react';
 import { PAYMENT_CONFIG } from '../data/servicesData';
-import { ServiceItem, GoogleUser } from '../types';
+import { ServiceItem, GoogleUser, DriveFileInfo, PaymentSubmission } from '../types';
+import { downloadOriginalDriveFile } from '../services/googleDriveService';
 
 interface PaymentAndDownloadProps {
   selectedService: ServiceItem | null;
   services: ServiceItem[];
   onSelectService: (service: ServiceItem) => void;
-  isPaid: boolean;
-  onConfirmPayment: (trxid?: string) => void;
-  onResetPayment: () => void;
   onNotify: (message: string) => void;
   user: GoogleUser | null;
-  onOpenLogin: () => void;
+  driveFile: DriveFileInfo | null;
+  onOpenDrivePicker: () => void;
+  accessToken: string | null;
+  pendingPayments: PaymentSubmission[];
+  approvedTIDs: string[];
+  onNewPaymentSubmitted: (submission: PaymentSubmission) => void;
+  onOpenAdmin: () => void;
 }
 
 export const PaymentAndDownload: React.FC<PaymentAndDownloadProps> = ({
   selectedService,
   services,
   onSelectService,
-  isPaid,
-  onConfirmPayment,
-  onResetPayment,
   onNotify,
-  user,
-  onOpenLogin,
+  driveFile,
+  onOpenDrivePicker,
+  accessToken,
+  pendingPayments,
+  approvedTIDs,
+  onNewPaymentSubmitted,
+  onOpenAdmin,
 }) => {
   const [copied, setCopied] = useState(false);
-  const [trxId, setTrxId] = useState('');
+  const [tidInput, setTidInput] = useState('');
+  const [screenshotBase64, setScreenshotBase64] = useState<string | null>(null);
+  const [screenshotFileName, setScreenshotFileName] = useState('');
   const [showQrModal, setShowQrModal] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [clientTidCheck, setClientTidCheck] = useState<string>(() => {
+    return localStorage.getItem('my_submitted_tid') || '';
+  });
+  const [isCheckingTid, setIsCheckingTid] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -59,100 +82,195 @@ export const PaymentAndDownload: React.FC<PaymentAndDownloadProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Initialize trxId from localStorage if present
-  useEffect(() => {
-    const savedTrx = localStorage.getItem('trxid');
-    if (savedTrx) setTrxId(savedTrx);
-  }, []);
-
   const handleCopyNumber = () => {
-    navigator.clipboard.writeText('03267976823');
+    navigator.clipboard.writeText('0326-7976823');
     setCopied(true);
-    onNotify('Number Copy! (03267976823 copied to clipboard)');
+    onNotify('Number Copy! (0326-7976823 copied to clipboard)');
     setTimeout(() => setCopied(false), 2500);
   };
 
-  const handleUnlockClick = () => {
-    const cleanId = trxId.trim();
-    if (cleanId.length >= 3) {
-      localStorage.setItem('paid', 'yes');
-      localStorage.setItem('trxid', cleanId);
-      onNotify('Payment Verified! Download Unlock Ho Gaya');
-      onConfirmPayment(cleanId);
-    } else {
-      onNotify('Pehle Transaction ID dalo (kam az kam 3-4 digits)');
-    }
+  // Compress uploaded screenshot so it fits cleanly in localStorage without quota issues
+  const compressImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 900;
+          let width = img.width;
+          let height = img.height;
+          if (width > MAX_WIDTH) {
+            height = Math.round((height * MAX_WIDTH) / width);
+            width = MAX_WIDTH;
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.82));
+        };
+        img.onerror = reject;
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
   };
 
-  const handleDownloadClick = () => {
-    if (!isPaid) {
-      onNotify('Pehle Left Side Se Payment Karke I Have Paid Dabao');
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      onNotify('Please upload an image file (PNG, JPG, Screenshot)');
       return;
     }
-    // Open Google Drive link
-    window.open(PAYMENT_CONFIG.driveLink, '_blank', 'noopener,noreferrer');
 
-    // Also download simulated deliverables key txt
-    const receiptContent = `=====================================================
-PROFESSIONAL FREELANCER - CLIENT DELIVERABLES VAULT
-=====================================================
-Client: ${user ? `${user.name} (${user.email})` : 'Authenticated Client'}
-Freelancer: KM (Verified Freelancer)
-Service: ${selectedService ? selectedService.title : 'All Project Deliverables'}
-JazzCash Account: 03267976823 (Title: KM)
-Transaction ID: ${trxId || 'VERIFIED'}
-Status: UNLOCKED & APPROVED
-Date: ${new Date().toLocaleDateString()}
-
-Deliverable Vault Access:
-Google Drive URL: ${PAYMENT_CONFIG.driveLink}
-
-WhatsApp Support: https://wa.me/923267976823
-=====================================================`;
-    const blob = new Blob([receiptContent], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `PF_Deliverables_Access_Key_${Date.now()}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    setUploadLoading(true);
+    try {
+      const base64 = await compressImage(file);
+      setScreenshotBase64(base64);
+      setScreenshotFileName(file.name);
+      onNotify('Screenshot uploaded successfully!');
+    } catch (err) {
+      console.error(err);
+      onNotify('Could not read image file. Please try another screenshot.');
+    } finally {
+      setUploadLoading(false);
+    }
   };
 
-  // Pre-selected service or first available
-  const currentService = selectedService || services[0];
+  // 1. CLIENT FLOW SUBMISSION
+  const handleSubmitPayment = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanTid = tidInput.trim();
+
+    // a) Validate TID min 6 digits
+    if (cleanTid.length < 6) {
+      onNotify('Transaction ID must be at least 6 digits!');
+      return;
+    }
+
+    // b) Validate screenshot uploaded
+    if (!screenshotBase64) {
+      onNotify('JazzCash Payment Screenshot is required! Please upload image.');
+      return;
+    }
+
+    // Check duplicate TID: If TID already in pending or approved list
+    const isAlreadyPending = pendingPayments.some((p) => p.tid.toLowerCase() === cleanTid.toLowerCase());
+    const isAlreadyApproved = approvedTIDs.some((t) => t.toLowerCase() === cleanTid.toLowerCase());
+
+    if (isAlreadyPending || isAlreadyApproved) {
+      onNotify('This TID already used. Please enter your valid new Transaction ID.');
+      return;
+    }
+
+    // Create payment submission
+    const currentSvc = selectedService || services[2] || services[0];
+    const newSubmission: PaymentSubmission = {
+      id: `pay-${Date.now()}`,
+      tid: cleanTid,
+      screenshotBase64,
+      date: new Date().toLocaleString(),
+      timestamp: Date.now(),
+      serviceTitle: currentSvc.title,
+      amountPkr: currentSvc.pricePkr || '300 Rs',
+      status: 'pending',
+    };
+
+    // Save and update
+    onNewPaymentSubmitted(newSubmission);
+    setClientTidCheck(cleanTid);
+    localStorage.setItem('my_submitted_tid', cleanTid);
+
+    // Auto send WhatsApp to admin with specified text
+    const waText = encodeURIComponent(
+      `NEW PAYMENT\nTID: ${cleanTid}\nAmount: ${currentSvc.pricePkr || '300 Rs'}\nFile: JazzCash & Approve in Admin Panel`
+    );
+    const waUrl = `https://wa.me/923267976823?text=${waText}`;
+    window.open(waUrl, '_blank', 'noopener,noreferrer');
+
+    // Notify user with required text
+    onNotify('⏳ Payment Under Verification - Admin will approve in 5-10 mins. You will get WhatsApp update.');
+
+    // Clear form inputs
+    setTidInput('');
+    setScreenshotBase64(null);
+    setScreenshotFileName('');
+  };
+
+  // Check if current user's TID is approved or pending
+  const activeTid = clientTidCheck.trim();
+  const isApproved = activeTid ? approvedTIDs.includes(activeTid) : false;
+  const pendingRecord = activeTid ? pendingPayments.find((p) => p.tid === activeTid) : null;
+  const isPending = pendingRecord && pendingRecord.status === 'pending';
+
+  // 3. CLIENT DOWNLOAD CHECK
+  const handleDownloadOriginalFile = async () => {
+    if (!isApproved) {
+      onNotify('Payment Under Verification - Awaiting Admin Approval.');
+      return;
+    }
+
+    setDownloading(true);
+    onNotify('Downloading original file from Google Drive...');
+
+    try {
+      const activeFile: DriveFileInfo = driveFile || {
+        id: '1H3O0YemVMw-FzJyLxKpUzLYrGYGpZI27',
+        name: 'Deliverables_Package.zip',
+        mimeType: 'application/zip',
+        webContentLink: 'https://drive.google.com/uc?export=download&id=1H3O0YemVMw-FzJyLxKpUzLYrGYGpZI27',
+      };
+
+      const result = await downloadOriginalDriveFile(activeFile, accessToken);
+      if (result.success) {
+        onNotify(`Original file "${activeFile.name}" downloaded successfully!`);
+      } else {
+        window.open('https://drive.google.com/uc?export=download&id=1H3O0YemVMw-FzJyLxKpUzLYrGYGpZI27', '_blank');
+      }
+    } catch (err: any) {
+      console.error(err);
+      window.open('https://drive.google.com/uc?export=download&id=1H3O0YemVMw-FzJyLxKpUzLYrGYGpZI27', '_blank');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  // Pre-selected service or default 300 Rs
+  const currentService = selectedService || services[2] || services[0];
 
   return (
     <section id="payment-download" className="py-14 lg:py-20 bg-slate-50 border-b border-slate-200">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Section Heading */}
         <div className="text-center max-w-3xl mx-auto mb-8">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-semibold uppercase tracking-wider mb-2">
-            <Zap className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Instant Payment Gateway & Delivery</span>
+          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-semibold uppercase tracking-wider mb-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span>Secure Admin-Verified Payment System</span>
           </div>
           <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
-            JazzCash Payment & Instant Download
+            JazzCash Payment & Verified Download
           </h2>
           <p className="mt-2 text-sm sm:text-base text-slate-600">
-            Send fee to our JazzCash account, enter the transaction ID digits, and unlock your files instantly.
+            Transfer fee to JazzCash (0326-7976823), upload your screenshot with TID (min 6 digits). Admin verifies in 5-10 minutes to unlock original Google Drive files.
           </p>
 
-          {/* ================= INTERACTIVE SELECT SERVICES DROPDOWN ================= */}
+          {/* Service Selector Dropdown */}
           <div className="mt-4 relative inline-block text-left" ref={dropdownRef}>
             <button
               type="button"
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              className="inline-flex items-center justify-between gap-3 px-4 py-2.5 bg-blue-50 hover:bg-blue-100 border-2 border-blue-300 rounded-xl text-xs sm:text-sm font-semibold text-blue-900 shadow-xs transition-all active:scale-98 cursor-pointer"
-              title="Click here to change or choose a service"
+              className="inline-flex items-center justify-between gap-3 px-4 py-2 bg-blue-50 hover:bg-blue-100 border border-blue-300 rounded-xl text-xs sm:text-sm font-semibold text-blue-900 shadow-xs transition-all cursor-pointer"
             >
               <span className="flex items-center gap-2">
                 <span className="text-slate-500 font-medium">Selected Service:</span>
                 <span className="font-bold text-blue-700">{currentService.title}</span>
                 <span className="text-slate-400">—</span>
                 <span className="font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200">
-                  {currentService.pricePkr} ({currentService.priceUsd})
+                  {currentService.pricePkr || '300 Rs'} ({currentService.priceUsd})
                 </span>
               </span>
               <ChevronDown
@@ -162,16 +280,10 @@ WhatsApp Support: https://wa.me/923267976823
               />
             </button>
 
-            {/* Helper label beneath */}
-            <div className="text-[11px] text-blue-600 mt-1 font-medium flex items-center justify-center gap-1">
-              <span>👆 Click karo doosri service select karne ke liye</span>
-            </div>
-
-            {/* Dropdown Menu Options */}
             {isDropdownOpen && (
-              <div className="absolute left-1/2 -translate-x-1/2 sm:left-0 sm:translate-x-0 mt-2 w-80 sm:w-96 rounded-2xl bg-white shadow-2xl border border-slate-200 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="absolute left-1/2 -translate-x-1/2 sm:left-0 sm:translate-x-0 mt-2 w-80 sm:w-96 rounded-2xl bg-white shadow-2xl border border-slate-200 py-2 z-50">
                 <div className="px-3 py-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
-                  Choose Service ({services.length} Available)
+                  Choose Service
                 </div>
                 <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
                   {services.map((svc) => (
@@ -184,7 +296,7 @@ WhatsApp Support: https://wa.me/923267976823
                       }}
                       className={`w-full flex items-center justify-between p-3 text-left transition-colors cursor-pointer ${
                         currentService.id === svc.id
-                          ? 'bg-blue-50/80 text-blue-900'
+                          ? 'bg-blue-50 text-blue-900'
                           : 'hover:bg-slate-50 text-slate-800'
                       }`}
                     >
@@ -203,9 +315,6 @@ WhatsApp Support: https://wa.me/923267976823
                         <div className="text-xs font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                           {svc.pricePkr}
                         </div>
-                        <div className="text-[10px] text-slate-400 font-medium">
-                          {svc.priceUsd}
-                        </div>
                       </div>
                     </button>
                   ))}
@@ -215,63 +324,9 @@ WhatsApp Support: https://wa.me/923267976823
           </div>
         </div>
 
-        {/* ================= GOOGLE USER VERIFICATION STRIP ================= */}
-        <div className="mb-6 p-3 sm:p-4 rounded-2xl bg-white border border-slate-200 flex flex-wrap items-center justify-between gap-3 shadow-xs">
-          <div className="flex items-center gap-3">
-            {/* Google Icon */}
-            <div className="w-8 h-8 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center shrink-0">
-              <svg className="w-4 h-4" viewBox="0 0 24 24">
-                <path
-                  fill="#4285F4"
-                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                />
-              </svg>
-            </div>
-            {user ? (
-              <div className="text-xs">
-                <span className="text-slate-500">Google Verified Client:</span>{' '}
-                <strong className="text-slate-900">{user.name}</strong>{' '}
-                <span className="text-slate-500">({user.email})</span>
-              </div>
-            ) : (
-              <div className="text-xs text-slate-600">
-                <strong className="text-slate-800">Google Login Available:</strong> Sign in with your Google account to secure your download link.
-              </div>
-            )}
-          </div>
-
-          <div>
-            {user ? (
-              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Account Verified ✅</span>
-              </span>
-            ) : (
-              <button
-                onClick={onOpenLogin}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200 transition-colors cursor-pointer"
-              >
-                <span>Google Sign In</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* ================= EXACT TWO BOXES SIDE BY SIDE ================= */}
+        {/* ================= TWO BOXES SIDE BY SIDE ================= */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
-          {/* ================= LEFT BOX ================= */}
+          {/* ================= LEFT BOX (PAYMENT & SUBMISSION) ================= */}
           <div
             style={{
               border: '2px solid #008000',
@@ -301,42 +356,11 @@ WhatsApp Support: https://wa.me/923267976823
                 </span>
               </div>
 
-              {/* Service Selection Picker Inside Left Box */}
-              <div className="my-3 bg-white/90 p-3.5 rounded-xl border border-emerald-200 text-xs">
-                <label htmlFor="service-picker" className="font-bold text-emerald-950 block mb-1">
-                  Pay for Service:
-                </label>
-                <select
-                  id="service-picker"
-                  value={currentService.id}
-                  onChange={(e) => {
-                    const found = services.find((s) => s.id === e.target.value);
-                    if (found) {
-                      onSelectService(found);
-                      onNotify(`Updated to ${found.title} (${found.pricePkr})`);
-                    }
-                  }}
-                  className="w-full p-2 bg-emerald-50 border border-emerald-300 rounded-lg text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                >
-                  {services.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.title} — {s.pricePkr} ({s.priceUsd})
-                    </option>
-                  ))}
-                </select>
-                <div className="flex items-center justify-between text-[11px] text-emerald-800 mt-1.5 font-medium">
-                  <span>Transfer Amount Required:</span>
-                  <span className="font-bold text-sm text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-200">
-                    {currentService.pricePkr}
-                  </span>
-                </div>
-              </div>
-
-              {/* Account Details Box */}
-              <div className="my-3 text-sm text-slate-800 space-y-2 bg-white/70 p-4 rounded-xl border border-emerald-200/80">
+              {/* Account Details Box - 0326-7976823, KM, 300 Rs */}
+              <div className="my-3 text-sm text-slate-800 space-y-2 bg-white/80 p-4 rounded-xl border border-emerald-200">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <span>
-                    JazzCash: <b className="font-mono text-base text-slate-900 select-all">03267976XXX</b>
+                    JazzCash: <b className="font-mono text-base text-slate-900 select-all">0326-7976823</b>
                   </span>
                   <button
                     onClick={handleCopyNumber}
@@ -366,76 +390,156 @@ WhatsApp Support: https://wa.me/923267976823
                   </button>
                 </div>
 
-                <div className="pt-1 text-sm">
-                  Title: <b className="text-slate-900 font-bold">KM</b>
+                <div className="pt-1 text-sm flex items-center justify-between">
+                  <span>Title: <b className="text-slate-900 font-bold">KM</b></span>
+                  <span>Amount: <b className="text-emerald-700 font-bold">{currentService.pricePkr || '300 Rs'}</b></span>
                 </div>
               </div>
 
-              {/* Transaction ID input */}
-              <div className="mb-4">
-                <label htmlFor="trxid" className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Enter JazzCash Transaction Details:
-                </label>
-                <input
-                  id="trxid"
-                  type="text"
-                  value={trxId}
-                  onChange={(e) => setTrxId(e.target.value)}
-                  placeholder="Transaction ID Last 4 Digits Likhen"
+              {/* Form: TID + Screenshot Upload */}
+              <form onSubmit={handleSubmitPayment} className="space-y-3.5">
+                {/* Field 1: Transaction ID (min 6 digits) */}
+                <div>
+                  <label htmlFor="tid-input" className="block text-xs font-bold text-slate-700 mb-1">
+                    a) Transaction ID (Min 6 Digits) *
+                  </label>
+                  <input
+                    id="tid-input"
+                    type="text"
+                    required
+                    value={tidInput}
+                    onChange={(e) => setTidInput(e.target.value)}
+                    placeholder="Enter JazzCash TID (min 6 digits e.g. 1049283)"
+                    minLength={6}
+                    style={{
+                      width: '100%',
+                      padding: '11px',
+                      borderRadius: '8px',
+                      border: '1px solid #718096',
+                      backgroundColor: 'white',
+                      color: '#1a202c',
+                      fontSize: '14px',
+                      outline: 'none',
+                    }}
+                    className="focus:ring-2 focus:ring-emerald-500 font-mono select-text"
+                  />
+                  <span className="text-[11px] text-slate-500 block mt-0.5">
+                    JazzCash SMS ya App se Transaction ID likhen
+                  </span>
+                </div>
+
+                {/* Field 2: Upload Screenshot (Image File Required) */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    b) Upload JazzCash Screenshot (Required) *
+                  </label>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    accept="image/*"
+                    onChange={handleFileChange}
+                    className="hidden"
+                  />
+
+                  {screenshotBase64 ? (
+                    <div className="p-3 bg-white rounded-xl border-2 border-emerald-400 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5 overflow-hidden">
+                        <img
+                          src={screenshotBase64}
+                          alt="Screenshot Preview"
+                          className="w-12 h-12 object-cover rounded-lg border border-slate-200 shrink-0"
+                        />
+                        <div className="overflow-hidden">
+                          <span className="text-xs font-bold text-slate-800 block truncate">
+                            {screenshotFileName || 'Payment_Receipt.jpg'}
+                          </span>
+                          <span className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1">
+                            <Check className="w-3 h-3" />
+                            <span>Screenshot Attached</span>
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setScreenshotBase64(null);
+                          setScreenshotFileName('');
+                          if (fileInputRef.current) fileInputRef.current.value = '';
+                        }}
+                        className="text-slate-400 hover:text-rose-600 p-1"
+                        title="Remove image"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={uploadLoading}
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full p-4 border-2 border-dashed border-emerald-400 hover:border-emerald-600 bg-white/70 hover:bg-white rounded-xl text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-1.5"
+                    >
+                      <Upload className="w-6 h-6 text-emerald-600" />
+                      <span className="text-xs font-bold text-emerald-950">
+                        {uploadLoading ? 'Uploading image...' : 'Click to Upload JazzCash Screenshot'}
+                      </span>
+                      <span className="text-[10px] text-slate-500">
+                        Camera se picture len ya Gallery se select karain
+                      </span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Submit Button */}
+                <button
+                  type="submit"
                   style={{
                     width: '100%',
-                    padding: '11px',
-                    borderRadius: '8px',
-                    border: '1px solid #718096',
-                    backgroundColor: 'white',
-                    color: '#1a202c',
-                    fontSize: '14px',
-                    outline: 'none',
+                    padding: '13px',
+                    background: '#008000',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '10px',
+                    fontWeight: 'bold',
+                    fontSize: '15px',
+                    cursor: 'pointer',
                   }}
-                  className="focus:ring-2 focus:ring-emerald-500 focus:border-transparent select-text"
-                />
-                <span className="text-[11px] text-slate-600 mt-1 block">
-                  JazzCash SMS se aakhri 4 digits ya transaction ID likhen
-                </span>
-              </div>
-
-              {/* Unlock Button */}
-              <button
-                onClick={handleUnlockClick}
-                style={{
-                  width: '100%',
-                  padding: '13px',
-                  background: '#008000',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '10px',
-                  fontWeight: 'bold',
-                  fontSize: '15px',
-                  cursor: 'pointer',
-                }}
-                className="hover:bg-emerald-700 transition-all shadow-md active:scale-[0.98] inline-flex items-center justify-center gap-2"
-              >
-                <span>I Have Paid - Unlock 🔓</span>
-              </button>
+                  className="hover:bg-emerald-700 transition-all shadow-md active:scale-[0.98] inline-flex items-center justify-center gap-2"
+                >
+                  <Clock className="w-4 h-4" />
+                  <span>Submit for Verification ⏳</span>
+                </button>
+              </form>
             </div>
 
             <div className="mt-5 pt-3 border-t border-emerald-200/60 flex items-center justify-between flex-wrap gap-2 text-slate-700">
               <span style={{ fontSize: '11px', fontWeight: 'bold' }}>
-                🛡️ 100% Secure | ⚡ Instant Release | ✅ Verified
+                🛡️ 100% Secure | ⚡ Manual Review | ✅ Verified
               </span>
 
-              <button
-                onClick={() => setShowQrModal(!showQrModal)}
-                className="text-xs text-emerald-800 hover:text-emerald-950 underline font-medium inline-flex items-center gap-1 cursor-pointer"
-              >
-                <QrCode className="w-3.5 h-3.5" />
-                <span>{showQrModal ? 'QR Chupao' : 'JazzCash QR'}</span>
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setShowQrModal(!showQrModal)}
+                  className="text-xs text-emerald-800 hover:text-emerald-950 underline font-medium inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>{showQrModal ? 'QR Chupao' : 'JazzCash QR'}</span>
+                </button>
+
+                <button
+                  onClick={onOpenAdmin}
+                  className="text-xs text-slate-500 hover:text-slate-900 font-semibold inline-flex items-center gap-1 cursor-pointer"
+                  title="Admin Dashboard Login"
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>Admin</span>
+                </button>
+              </div>
             </div>
 
             {/* QR Code toggle view */}
             {showQrModal && (
-              <div className="mt-3 p-3 bg-white border border-emerald-300 rounded-xl text-center">
+              <div className="mt-3 p-3 bg-white border border-emerald-300 rounded-xl text-center animate-in fade-in">
                 <div className="text-xs font-bold text-slate-800 mb-1">Scan & Pay via JazzCash App</div>
                 <div className="inline-block p-2 bg-slate-900 rounded-lg">
                   <div className="w-28 h-28 bg-white p-1 rounded flex flex-col items-center justify-center">
@@ -443,13 +547,13 @@ WhatsApp Support: https://wa.me/923267976823
                   </div>
                 </div>
                 <div className="text-[11px] font-mono font-bold text-slate-800 mt-1">
-                  03267976823 (KM)
+                  0326-7976823 (KM)
                 </div>
               </div>
             )}
           </div>
 
-          {/* ================= RIGHT BOX ================= */}
+          {/* ================= RIGHT BOX (DOWNLOAD & STATUS CHECK) ================= */}
           <div
             style={{
               border: '2px solid #ddd',
@@ -465,12 +569,13 @@ WhatsApp Support: https://wa.me/923267976823
                 Download Files
               </b>
               <p className="text-xs text-slate-500 mt-1 mb-5">
-                Your deliverables are ready to download
+                Original file unlocks after admin verification
               </p>
 
-              {/* Dynamic state container as requested */}
+              {/* Dynamic State Container */}
               <div id="dlbox" className="space-y-4">
-                {isPaid ? (
+                {/* CASE 1: APPROVED */}
+                {isApproved ? (
                   <div className="animate-in fade-in duration-300 space-y-4">
                     <div
                       style={{
@@ -487,37 +592,108 @@ WhatsApp Support: https://wa.me/923267976823
                       ✓ Download enabled after successful payment
                     </div>
 
-                    <a
-                      href={PAYMENT_CONFIG.driveLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={handleDownloadClick}
+                    {/* Unlocked Big Blue Download Button */}
+                    <button
+                      onClick={handleDownloadOriginalFile}
+                      disabled={downloading}
                       style={{
                         display: 'block',
+                        width: '100%',
                         padding: '15px',
                         background: '#0d6efd',
                         color: 'white',
                         borderRadius: '10px',
-                        textDecoration: 'none',
+                        border: 'none',
                         fontWeight: 'bold',
                         fontSize: '16px',
                         boxShadow: '0 4px 12px rgba(13,110,253,0.3)',
+                        cursor: 'pointer',
                       }}
-                      className="hover:bg-blue-700 transition-all hover:scale-[1.01] active:scale-[0.98]"
+                      className="hover:bg-blue-700 transition-all hover:scale-[1.01] active:scale-[0.98] inline-flex items-center justify-center gap-2"
                     >
-                      📁 Download Your Files Now
-                    </a>
+                      <Download className={`w-5 h-5 ${downloading ? 'animate-bounce' : ''}`} />
+                      <span>
+                        {downloading
+                          ? 'Downloading Original File...'
+                          : '📁 Download Your Files Now'}
+                      </span>
+                    </button>
 
                     <div className="p-3 bg-white rounded-xl border border-slate-200 text-xs text-slate-600 text-left space-y-1">
-                      <div className="font-bold text-slate-800">
-                        Deliverables for: {currentService.title}
+                      <div className="font-bold text-slate-900 flex items-center justify-between">
+                        <span>Original Drive File:</span>
+                        <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          Approved ✅
+                        </span>
                       </div>
-                      <div>• Clean Unwatermarked Source Files</div>
-                      <div>• High-Resolution Export Packages (HD/4K)</div>
-                      <div>• Commercial License & WhatsApp Support</div>
+                      <div className="text-[11px] text-slate-700 font-mono truncate">
+                        ID: 1H3O0YemVMw-FzJyLxKpUzLYrGYGpZI27
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        • Verified direct Google Drive stream (No HTML, No 0.61 KB errors).
+                      </div>
                     </div>
                   </div>
+                ) : isPending ? (
+                  /* CASE 2: PENDING ADMIN APPROVAL */
+                  <div className="space-y-4 animate-in fade-in">
+                    <div
+                      style={{
+                        background: '#fff3cd',
+                        padding: '16px 14px',
+                        borderRadius: '10px',
+                        border: '1px solid #ffeeba',
+                        color: '#856404',
+                      }}
+                    >
+                      <div className="font-bold text-sm sm:text-base flex items-center justify-center gap-2">
+                        <Clock className="w-5 h-5 text-amber-600 animate-spin" />
+                        <span>⏳ Payment Under Verification</span>
+                      </div>
+                      <p className="text-xs mt-2 leading-relaxed text-amber-950 font-medium">
+                        Admin will approve in 5-10 mins. You will get WhatsApp update.
+                      </p>
+                      <div className="mt-2 text-[11px] font-mono text-amber-800">
+                        Submitted TID: <strong>{activeTid}</strong>
+                      </div>
+                    </div>
+
+                    <button
+                      disabled
+                      style={{
+                        width: '100%',
+                        padding: '14px',
+                        background: 'grey',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '10px',
+                        fontWeight: 'bold',
+                        fontSize: '15px',
+                        cursor: 'not-allowed',
+                      }}
+                    >
+                      🔒 Download Locked - Awaiting Admin Approval
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const check = localStorage.getItem('approvedTIDs');
+                        const list = check ? JSON.parse(check) : [];
+                        if (list.includes(activeTid)) {
+                          onNotify('Payment Approved! Download is now unlocked.');
+                          window.location.reload();
+                        } else {
+                          onNotify('Status check: Payment is still under review by Admin.');
+                        }
+                      }}
+                      className="text-xs text-blue-600 hover:text-blue-800 underline font-semibold cursor-pointer"
+                    >
+                      🔄 Click to re-check approval status
+                    </button>
+                  </div>
                 ) : (
+                  /* CASE 3: NO PAYMENT SUBMITTED YET */
                   <div className="space-y-4">
                     <div
                       style={{
@@ -529,15 +705,14 @@ WhatsApp Support: https://wa.me/923267976823
                       }}
                     >
                       <div className="font-bold text-base">🔒 Payment Required to Unlock</div>
-                      <small className="text-xs block mt-1">
-                        Pehle Left Side Se Payment Karke I Have Paid Dabao
+                      <small className="text-xs block mt-1.5 leading-relaxed">
+                        Pehle Left Side se JazzCash <strong>0326-7976823</strong> par <strong>{currentService.pricePkr || '300 Rs'}</strong> bhej kar TID aur Screenshot upload karain.
                       </small>
                     </div>
 
                     <button
                       disabled
                       style={{
-                        marginTop: '15px',
                         width: '100%',
                         padding: '14px',
                         background: 'grey',
@@ -552,9 +727,36 @@ WhatsApp Support: https://wa.me/923267976823
                       🔒 Download Files - Locked
                     </button>
 
-                    <p className="text-xs text-slate-500 italic">
-                      Jaise hi aap transaction ID daal kar "I Have Paid" daban ge, ye button blue ho kar unlock ho jaye ga.
-                    </p>
+                    {/* Manual TID Checker for returning users */}
+                    <div className="pt-2 text-left bg-white p-3 rounded-xl border border-slate-200">
+                      <span className="text-[11px] font-bold text-slate-700 block mb-1">
+                        Pehle se paid hai? TID enter kar ke check karain:
+                      </span>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={clientTidCheck}
+                          onChange={(e) => setClientTidCheck(e.target.value)}
+                          placeholder="Enter your 6-digit TID"
+                          className="flex-1 px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg select-text font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!clientTidCheck) return;
+                            localStorage.setItem('my_submitted_tid', clientTidCheck);
+                            if (approvedTIDs.includes(clientTidCheck.trim())) {
+                              onNotify('TID Verified & Approved! Download unlocked.');
+                            } else {
+                              onNotify('TID not yet approved or not found in system.');
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-slate-900 text-white text-xs font-bold rounded-lg cursor-pointer"
+                        >
+                          Check
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -562,17 +764,17 @@ WhatsApp Support: https://wa.me/923267976823
 
             {/* Bottom Actions */}
             <div className="pt-4 mt-6 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500">
-              <span>Google Drive Cloud Delivery</span>
-              {isPaid && (
-                <button
-                  onClick={onResetPayment}
-                  className="inline-flex items-center gap-1 text-slate-400 hover:text-slate-700 underline cursor-pointer"
-                  title="Test locking again"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  <span>Lock again (Reset)</span>
-                </button>
-              )}
+              <span className="flex items-center gap-1">
+                <HardDrive className="w-3.5 h-3.5 text-blue-600" />
+                <span>Google Drive Vault: 1H3O0YemVMw...</span>
+              </span>
+
+              <button
+                onClick={onOpenAdmin}
+                className="text-xs text-blue-600 hover:text-blue-800 underline font-medium cursor-pointer"
+              >
+                Admin Panel (/admin)
+              </button>
             </div>
           </div>
         </div>

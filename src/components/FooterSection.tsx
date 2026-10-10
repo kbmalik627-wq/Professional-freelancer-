@@ -153,6 +153,14 @@ export const FooterSection: React.FC<FooterSectionProps> = ({
                   Payment & Download Portal
                 </a>
               </li>
+              <li>
+                <a
+                  href="#admin"
+                  className="text-slate-500 hover:text-slate-300 transition-colors"
+                >
+                  Admin Verification (/admin)
+                </a>
+              </li>
             </ul>
           </div>
         </div>

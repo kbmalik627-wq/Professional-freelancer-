@@ -5,7 +5,7 @@ export const PAYMENT_CONFIG: PaymentDetails = {
   accountTitle: 'KM',
   provider: 'JazzCash',
   adminWhatsApp: '923267976823',
-  driveLink: 'https://drive.google.com/drive/folders/1PF-KM-Freelance-Deliverables-Vault?usp=sharing'
+  driveLink: 'https://drive.google.com/uc?export=download&id=1H3O0YemVMw-FzJyLxKpUzLYrGYGpZI27'
 };
 
 export const INITIAL_SERVICES: ServiceItem[] = [

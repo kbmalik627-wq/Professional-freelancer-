@@ -35,3 +35,28 @@ export interface GoogleUser {
   verified: boolean;
 }
 
+export interface DriveFileInfo {
+  id: string;
+  name: string;
+  mimeType: string;
+  size?: number | string;
+  webViewLink?: string;
+  webContentLink?: string;
+  iconLink?: string;
+  modifiedTime?: string;
+}
+
+export interface PaymentSubmission {
+  id: string;
+  tid: string;
+  screenshotBase64: string;
+  date: string;
+  timestamp: number;
+  serviceTitle: string;
+  amountPkr: string;
+  senderName?: string;
+  status: 'pending' | 'approved' | 'rejected';
+}
+
+
+
