@@ -45,15 +45,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [newManualTid, setNewManualTid] = useState('');
   const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'all'>('pending');
 
+  const adminPassSecret = (import.meta.env.VITE_ADMIN_PASS || '786786').toString();
+
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (password.trim() === '326797') {
+    if (password.trim() === adminPassSecret) {
       setIsAuthenticated(true);
       sessionStorage.setItem('admin_authenticated', 'true');
       setErrorMsg('');
       onNotify('Admin Login Successful');
     } else {
-      setErrorMsg('Incorrect Password! (Enter 326797)');
+      setErrorMsg('Wrong Password');
     }
   };
 
@@ -104,9 +106,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   type="password"
                   required
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter Password (326797)"
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    if (errorMsg) setErrorMsg('');
+                  }}
+                  placeholder="Enter Admin Password"
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 select-text"
+                  autoComplete="current-password"
                 />
               </div>
               {errorMsg && (
